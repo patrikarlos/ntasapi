@@ -1,0 +1,151 @@
+#!/bin/bash
+
+CONTROL="194.47.151.125/ntas"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf $TMPDIR' EXIT
+
+function get_info(){
+		filename="$TMPDIR/info-$1"
+		if [[ ! -e "$filename" ]]; then
+				if ! curl -s "http://$CONTROL/api/info.php?exp=$1" > "$filename"; then
+					echo "Failed to read experiment status, curl failed" > /dev/stderr
+					echo "/dev/null"
+					return
+				fi
+		fi
+		echo "$filename"
+}
+
+
+function find_info(){
+                filename="$TMPDIR/info-$1"
+                if [[ ! -e "$filename" ]]; then
+                                if ! curl -s "http://$CONTROL/api/find.php?command=$1" > "$filename"; then
+                                        echo "Failed to read experiment status, curl failed" > /dev/stderr
+                                        echo "/dev/null"
+                                        return
+                                fi
+                fi
+                echo "$filename"
+}
+
+function find_pl_info(){
+                filename="$TMPDIR/info-$1"
+                if [[ ! -e "$filename" ]]; then
+                                if ! curl -s "http://$CONTROL/api/find.php?platform=$1" > "$filename"; then
+                                        echo "Failed to read experiment status, curl failed" > /dev/stderr
+                                        echo "/dev/null"
+                                        return
+                                fi
+                fi
+                echo "$filename"
+}
+
+
+
+function find_exp(){
+    cat $(find_info $1)
+}    
+
+function find_platform(){
+    cat $(find_pl_info $1)
+}
+    
+
+function get_platform_name(){
+		sed -n 's/Platform: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_platform_ip(){
+		local IPaddr=$(sed -n 's/IP: \(.*\)/\1/p' $(get_info $1))
+		if [[ "$IPaddr" =~ ":" ]]; then
+		    IPaddr=$(echo $IPaddr | cut -f1 -d":")
+		fi
+		echo "$IPaddr";
+}
+
+function get_exp_status(){
+		sed -n 's/Status: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_exp_total_runs(){
+		sed -n 's/^Runs: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_exp_summary_runs(){
+		sed -n 's/^Summary runs: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_exp_log_runs(){
+		sed -n 's/^Log runs: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_exp_command(){
+		sed -n 's/Command: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_run_status(){
+		curl -s "http://$CONTROL/api/status.php?exp=$1&run=$2&type=status" | sed -n 's/Status: \(.*\)/\1/p'
+}
+
+function get_run_log(){
+		curl -s "http://$CONTROL/api/logstatus.php?exp=$1&run=$2&type=log" | grep -v 'Log:' | grep -v 'Platform:'
+}
+
+function get_run_duration(){
+		curl -s "http://$CONTROL/api/logstatus.php?exp=$1&run=$2&type=duration"
+}
+
+
+
+function get_valid_runs(){
+		sed -n 's/Valid runs: \(.*\)/\1/p' $(get_info $1)
+}
+
+function get_invalid_runs(){
+		sed -n 's/Invalid runs: \(.*\)/\1/p' $(get_info $1)
+}
+
+function expsum(){
+    echo "Platform  : " $(get_platform_name $1)
+    echo "Command   : " $(get_exp_command $1)
+    echo "Valid runs: " `echo $(get_valid_runs $1) | wc -w `
+    echo "Status    : " $(get_exp_status $1)
+
+
+}
+# Get a list of valid tracefiles for given experiment
+# $1 Experiment ID
+# $2 [optional] Subdirectory to use (e.g. "filteredtraces", default is "traces")
+# $3 [optional] Path prefix (default is "/mnt/LONTAS")
+function get_valid_traces(){
+		local exp=$1
+		local dir=${2:-traces}
+		local prefix=${3:-/mnt/LONTAS}
+		echo $(echo $(get_valid_runs $1) | sed "s#\([0-9]*\)#$prefix/$dir/trace-$exp-\1.cap#g")
+}
+
+function expidsum(){
+    local file=$1
+    cat $file | while read line; do
+	echo "$line: " $(get_platform_name $line)  " " $(get_exp_command $line) " " $(get_valid_runs $line | wc -w )
+    done
+}
+
+function findPendRunn(){
+    local file=$(find_pl_info $1)
+    cat $file | while read line; do 
+	local expStat=$(get_exp_status $line )
+	if [[ "$expStat" == "STARTED" || "$expStat" = "PENDING" ]]; then
+	    echo "$line $expStat"
+#	else
+#	    echo "$line $expStat -- NOT interesting (remove after debug)"
+	fi
+    done
+}
+
+
+
+function show_platforms(){
+    curl -s "http://$CONTROL/api/platform.php?command=list" 
+}
